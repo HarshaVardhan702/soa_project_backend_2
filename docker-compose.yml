@@ -1,0 +1,102 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis123
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  eureka-server:
+    build:
+      context: .
+      dockerfile: eureka-server/Dockerfile
+    ports:
+      - "8761:8761"
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    environment:
+      EUREKA_URL: http://eureka-server:8761/eureka/
+      JWT_SECRET: ${JWT_SECRET:-ChangeThisDevelopmentSecretKeyToAtLeast32Bytes!}
+    depends_on:
+      - eureka-server
+
+  policy-service:
+    build:
+      context: .
+      dockerfile: policy-service/Dockerfile
+    environment:
+      EUREKA_URL: http://eureka-server:8761/eureka/
+      DB_URL: jdbc:postgresql://postgres:5432/aegis_policy
+      DB_USERNAME: aegis
+      DB_PASSWORD: aegis123
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+
+  approval-service:
+    build:
+      context: .
+      dockerfile: approval-service/Dockerfile
+    environment:
+      EUREKA_URL: http://eureka-server:8761/eureka/
+      DB_URL: jdbc:postgresql://postgres:5432/aegis_approval
+      DB_USERNAME: aegis
+      DB_PASSWORD: aegis123
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+
+  claim-service:
+    build:
+      context: .
+      dockerfile: claim-service/Dockerfile
+    environment:
+      EUREKA_URL: http://eureka-server:8761/eureka/
+      DB_URL: jdbc:postgresql://postgres:5432/aegis_claim
+      DB_USERNAME: aegis
+      DB_PASSWORD: aegis123
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+      policy-service:
+        condition: service_started
+      approval-service:
+        condition: service_started
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    environment:
+      EUREKA_URL: http://eureka-server:8761/eureka/
+      JWT_SECRET: ${JWT_SECRET:-ChangeThisDevelopmentSecretKeyToAtLeast32Bytes!}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - eureka-server
+      - auth-service
+      - policy-service
+      - approval-service
+      - claim-service
+
+volumes:
+  postgres-data:
